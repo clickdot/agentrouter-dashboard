@@ -30,6 +30,8 @@ app.post("/api/chat", async (req, res) => {
       headers: {
         "Content-Type": "application/json",
         "Authorization": `Bearer ${API_KEY}`,
+        "User-Agent": "codex_cli_rs/0.80.0",
+        "originator": "codex_cli_rs",
       },
       body: JSON.stringify({ model, messages, stream: true }),
     });

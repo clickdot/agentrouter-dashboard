@@ -1,8 +1,5 @@
 import "dotenv/config";
 import express from "express";
-import { WebSocketServer } from "ws";
-import http from "http";
-import pty from "node-pty";
 import { execFile } from "child_process";
 import fs from "fs/promises";
 import path from "path";
@@ -11,12 +8,11 @@ import { classifyCommand } from "./safety.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
-const server = http.createServer(app);
 
 app.use(express.json());
 app.use(express.static(path.join(__dirname, "../web")));
 
-const BASE_URL = "http://127.0.0.1:8787/v1";
+const BASE_URL = process.env.OPENAI_BASE_URL || "http://127.0.0.1:8787/v1";
 const API_KEY  = process.env.AGENT_ROUTER_TOKEN;
 
 // Chat endpoint — proxies to AgentRouter via raw fetch (no SDK extra headers)
@@ -222,46 +218,7 @@ app.post("/api/exec", async (req, res) => {
   });
 });
 
-// Terminal WebSocket — one PTY per connection
-const terminalWss = new WebSocketServer({ server, path: "/terminal" });
-
-terminalWss.on("connection", (socket) => {
-  const shell = process.platform === "win32" ? "powershell.exe" : "bash";
-
-  const term = pty.spawn(shell, [], {
-    name: "xterm-color",
-    cols: 120,
-    rows: 30,
-    cwd: process.env.WORK_DIR || process.cwd(),
-    env: process.env,
-  });
-
-  term.onData((data) => {
-    if (socket.readyState === socket.OPEN) {
-      socket.send(JSON.stringify({ type: "output", data }));
-    }
-  });
-
-  term.onExit(() => {
-    if (socket.readyState === socket.OPEN) {
-      socket.send(JSON.stringify({ type: "exit" }));
-      socket.close();
-    }
-  });
-
-  socket.on("message", (raw) => {
-    try {
-      const msg = JSON.parse(raw.toString());
-      if (msg.type === "input") term.write(msg.data);
-      if (msg.type === "resize") term.resize(msg.cols, msg.rows);
-      if (msg.type === "kill") { term.kill(); socket.close(); }
-    } catch (_) {}
-  });
-
-  socket.on("close", () => term.kill());
-});
-
-const PORT = process.env.PORT || 3001;
-server.listen(PORT, () => {
+const PORT = process.env.PORT || 3365;
+app.listen(PORT, () => {
   console.log(`AgentRouter Dashboard running → http://localhost:${PORT}`);
 });

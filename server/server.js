@@ -12,7 +12,7 @@ const app = express();
 app.use(express.json());
 app.use(express.static(path.join(__dirname, "../web")));
 
-const BASE_URL = process.env.OPENAI_BASE_URL || "http://127.0.0.1:8787/v1";
+const BASE_URL = process.env.OPENAI_BASE_URL || "https://agentrouter.org/v1";
 const API_KEY  = process.env.AGENT_ROUTER_TOKEN;
 
 // Chat endpoint — proxies to AgentRouter via raw fetch (no SDK extra headers)

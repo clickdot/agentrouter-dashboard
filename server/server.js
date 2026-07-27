@@ -21,7 +21,8 @@ app.post("/api/chat", async (req, res) => {
     return res.status(500).json({ error: "Missing AGENT_ROUTER_TOKEN in .env" });
   }
 
-  const { messages, model = "gpt-5.5" } = req.body;
+  const { messages } = req.body;
+  const model = req.body.model || "gpt-5.5";
 
   // Retry a few times on transient upstream blocks (e.g. WAF 405 HTML pages)
   async function callUpstream(attempt = 0) {

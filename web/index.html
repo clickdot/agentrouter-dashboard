@@ -1066,7 +1066,10 @@
   <div id="file-viewer-box">
     <div id="file-viewer-head">
       <span id="file-viewer-path"></span>
-      <button id="file-viewer-close">&times;</button>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <button class="tool-btn" id="file-viewer-preview" style="display:none;">Preview ↗</button>
+        <button id="file-viewer-close">&times;</button>
+      </div>
     </div>
     <div id="file-viewer-body"></div>
   </div>
@@ -1124,7 +1127,7 @@ let sessions = loadSessions();
 let currentSessionId = null;
 let history = [];
 
-const DEFAULT_SYSTEM_PROMPT = "You are an elite coding agent and systems engineer with deep expertise in Linux, bash, Python, JavaScript, networking, and DevOps. You run inside AgentRouter Dashboard with direct access to a real bash terminal on the host machine.\n\nHOW YOUR OUTPUT IS DISPLAYED:\n- Your intermediate reasoning and commands are shown in a collapsible 'Thinking' panel.\n- Your FINAL message (the one with no command) is shown as the main answer. Make it clean, well-formatted markdown: use headings, tables, bullet lists, and code blocks where helpful.\n\nRUNNING COMMANDS:\n- To run a shell command, output this JSON object (it is parsed and stripped from display):\n{\"type\":\"command_request\",\"command\":\"<exact shell command>\",\"reason\":\"<short why>\"}\n- Put a brief sentence of reasoning before it. Emit exactly ONE command_request per message.\n- Use plain double quotes in the JSON. The command string may contain single quotes, pipes, etc.\n- After a command runs, you receive its exit code + output as the next message. Then either run another command or give your final answer.\n\nRULES:\n- Be terse and technical in reasoning; thorough and well-organized in the final answer.\n- When presenting command results (processes, system info, etc.), format them as markdown tables or clean lists — never dump raw text.\n- Always produce a final answer. Never end on a command without interpreting its result.\n- Diagnose and fix issues directly. Don't ask permission for obvious read-only steps.";
+const DEFAULT_SYSTEM_PROMPT = "You are an elite coding agent and systems engineer with deep expertise in Linux, bash, Python, JavaScript, networking, and DevOps. You run inside AgentRouter Dashboard with direct access to a real bash terminal.\n\nWORKSPACE:\n- You have a dedicated working directory for THIS chat. All commands run there (it is your cwd). Create files, scripts, and projects directly in it with relative paths — e.g. `cat > app.py`, `mkdir src`, `npm init -y`.\n- The user sees the files you create in a Files panel and can preview HTML you build. When you build a web page/dashboard, save it as an .html file so they can preview it.\n- Keep everything self-contained in the workspace. Don't touch files outside it.\n\nHOW YOUR OUTPUT IS DISPLAYED:\n- Your intermediate reasoning and commands are shown in a collapsible 'Thinking' panel.\n- Your FINAL message (the one with no command) is shown as the main answer. Make it clean, well-formatted markdown: use headings, tables, bullet lists, and code blocks where helpful.\n\nRUNNING COMMANDS:\n- To run a shell command, output this JSON object (it is parsed and stripped from display):\n{\"type\":\"command_request\",\"command\":\"<exact shell command>\",\"reason\":\"<short why>\"}\n- Put a brief sentence of reasoning before it. Emit exactly ONE command_request per message.\n- Use plain double quotes in the JSON. The command string may contain single quotes, pipes, heredocs, etc.\n- After a command runs, you receive its exit code + output as the next message. Then either run another command or give your final answer.\n\nRULES:\n- Be terse and technical in reasoning; thorough and well-organized in the final answer.\n- When presenting command results (processes, system info, etc.), format them as markdown tables or clean lists — never dump raw text.\n- When you build something, tell the user the filename and that they can open it from the Files panel.\n- Always produce a final answer. Never end on a command without interpreting its result.\n- Diagnose and fix issues directly. Don't ask permission for obvious read-only steps.";
 
 function newSession() {
   currentSessionId = Date.now().toString();
@@ -1555,7 +1558,7 @@ async function sendMessage(text) {
   if (mentionMatches.length) {
     const attachments = await Promise.all(mentionMatches.map(async m => {
       try {
-        const res = await fetch("/api/file?path=" + encodeURIComponent(m[1]));
+        const res = await fetch("/api/file?session=" + encodeURIComponent(currentSessionId) + "&path=" + encodeURIComponent(m[1]));
         const data = await res.json();
         if (data.error) return null;
         return `\n\n--- @${m[1]} ---\n\`\`\`\n${data.content}\n\`\`\``;
@@ -1719,7 +1722,7 @@ async function runCommand({ command, reason }, turn, signal) {
     const r = await fetch("/api/exec", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ command }),
+      body: JSON.stringify({ command, session: currentSessionId }),
       signal
     });
     const data = await r.json();
@@ -1741,6 +1744,12 @@ async function runCommand({ command, reason }, turn, signal) {
 
   const snippet = (output || "").slice(-6000);
   history.push({ role: "user", content: `Command: ${command}\nExit code: ${exitCode ?? "unknown"}${timedOut ? " (timed out)" : ""}\nOutput:\n\`\`\`\n${snippet || "(no output)"}\n\`\`\`` });
+
+  // Refresh the file panel if it's open — the command may have created/changed files
+  const panel = document.getElementById("file-panel");
+  if (panel && panel.classList.contains("open")) loadFileTree("");
+  allFilesCache = null; // invalidate @mention cache
+
   return "done";
 }
 
@@ -1890,9 +1899,13 @@ async function loadFileTree(dirPath) {
   const tree = document.getElementById("file-tree");
   tree.innerHTML = '<div class="file-node">Loading…</div>';
   try {
-    const res = await fetch("/api/files?path=" + encodeURIComponent(dirPath));
+    const res = await fetch("/api/files?session=" + encodeURIComponent(currentSessionId) + "&path=" + encodeURIComponent(dirPath));
     const data = await res.json();
     tree.innerHTML = "";
+    if (data.items && data.items.length === 0 && !dirPath) {
+      tree.innerHTML = '<div class="file-node" style="color:var(--muted);cursor:default;">No files yet. Ask the agent to build something.</div>';
+      return;
+    }
     if (dirPath) {
       const up = document.createElement("div");
       up.className = "file-node dir";
@@ -1912,16 +1925,30 @@ async function loadFileTree(dirPath) {
   } catch (_) { tree.innerHTML = '<div class="file-node">Error loading files</div>'; }
 }
 
+// Preview URL for a workspace file (served raw so HTML renders)
+function workspaceUrl(filePath) {
+  return "/workspace/" + encodeURIComponent(currentSessionId) + "/" + filePath.split("/").map(encodeURIComponent).join("/");
+}
+
 async function viewFile(filePath) {
   document.getElementById("file-viewer-path").textContent = filePath;
   const body = document.getElementById("file-viewer-body");
   body.innerHTML = "Loading…";
   document.getElementById("file-viewer-overlay").classList.add("visible");
+
+  // Show/attach a Preview button for previewable files (HTML/images/svg)
+  const ext = (filePath.split(".").pop() || "").toLowerCase();
+  const previewable = ["html", "htm", "svg", "png", "jpg", "jpeg", "gif", "webp"].includes(ext);
+  const previewBtn = document.getElementById("file-viewer-preview");
+  if (previewBtn) {
+    previewBtn.style.display = previewable ? "inline-block" : "none";
+    previewBtn.onclick = () => window.open(workspaceUrl(filePath), "_blank");
+  }
+
   try {
-    const res = await fetch("/api/file?path=" + encodeURIComponent(filePath));
+    const res = await fetch("/api/file?session=" + encodeURIComponent(currentSessionId) + "&path=" + encodeURIComponent(filePath));
     const data = await res.json();
     if (data.error) { body.textContent = "Error: " + data.error; return; }
-    const ext = filePath.split(".").pop();
     body.innerHTML = "";
     const pre = document.createElement("pre");
     pre.className = "md-code";
@@ -1943,9 +1970,9 @@ let mentionActive = -1;
 const mentionPop = document.getElementById("mention-pop");
 
 async function ensureFileList() {
-  if (allFilesCache) return allFilesCache;
+  // Scoped to the current session; refetch each time since files change as the agent works.
   try {
-    const res = await fetch("/api/filelist");
+    const res = await fetch("/api/filelist?session=" + encodeURIComponent(currentSessionId));
     const data = await res.json();
     allFilesCache = data.files || [];
   } catch (_) { allFilesCache = []; }

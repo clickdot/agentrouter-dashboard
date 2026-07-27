@@ -8,6 +8,9 @@
 # ── Dependencies ───────────────────────────────────────────────────────────
 node_modules/
 
+# ── Per-chat workspaces (user-generated files) ─────────────────────────────
+workspaces/
+
 # ── Logs ───────────────────────────────────────────────────────────────────
 *.log
 npm-debug.log*

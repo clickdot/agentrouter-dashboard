@@ -9,7 +9,7 @@ import { classifyCommand } from "./safety.js";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 
-app.use(express.json());
+app.use(express.json({ limit: "10mb" }));
 app.use(express.static(path.join(__dirname, "../web")));
 
 const BASE_URL = process.env.OPENAI_BASE_URL || "https://agentrouter.org/v1";
